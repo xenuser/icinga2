@@ -17,7 +17,7 @@
  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA.             *
  ******************************************************************************/
 
-#include "db_ido/endpointdbobject.hpp"
+#include "db_ido/zonedbobject.hpp"
 #include "db_ido/dbtype.hpp"
 #include "db_ido/dbvalue.hpp"
 #include "icinga/icingaapplication.hpp"
@@ -32,102 +32,111 @@
 using namespace icinga;
 
 
-REGISTER_DBTYPE(Endpoint, "endpoint", DbObjectTypeEndpoint, "endpoint_object_id", EndpointDbObject);
+REGISTER_DBTYPE(Zone, "zone", DbObjectTypeZone, "zone_object_id", ZoneDbObject);
 
-INITIALIZE_ONCE(&EndpointDbObject::StaticInitialize);
+INITIALIZE_ONCE(&ZoneDbObject::StaticInitialize);
 
-void EndpointDbObject::StaticInitialize(void)
+void ZoneDbObject::StaticInitialize(void)
 {
-	Endpoint::OnConnected.connect(boost::bind(&EndpointDbObject::UpdateConnectedStatus, _1));
-	Endpoint::OnDisconnected.connect(boost::bind(&EndpointDbObject::UpdateConnectedStatus, _1));
+	/* TODO: find a way to signal zone connection updates from lib/remote/zones.cpp */
+/*
+	Zone::OnConnected.connect(boost::bind(&ZoneDbObject::UpdateConnectedStatus, _1));
+	Zone::OnDisconnected.connect(boost::bind(&ZoneDbObject::UpdateConnectedStatus, _1));
+*/
 }
 
-EndpointDbObject::EndpointDbObject(const DbType::Ptr& type, const String& name1, const String& name2)
+ZoneDbObject::ZoneDbObject(const DbType::Ptr& type, const String& name1, const String& name2)
 	: DbObject(type, name1, name2)
 { }
 
-Dictionary::Ptr EndpointDbObject::GetConfigFields(void) const
+Dictionary::Ptr ZoneDbObject::GetConfigFields(void) const
 {
 	Dictionary::Ptr fields = new Dictionary();
-	Endpoint::Ptr endpoint = static_pointer_cast<Endpoint>(GetObject());
+	Zone::Ptr zone = static_pointer_cast<Zone>(GetObject());
 
-	fields->Set("identity", endpoint->GetName());
-	fields->Set("node", IcingaApplication::GetInstance()->GetNodeName());
-	fields->Set("zone_object_id", endpoint->GetZone());
+	fields->Set("is_global", zone->IsGlobal() ? 1 : 0);
+	fields->Set("parent_zone_object_id", zone->GetParent());
 
 	return fields;
 }
 
-Dictionary::Ptr EndpointDbObject::GetStatusFields(void) const
+Dictionary::Ptr ZoneDbObject::GetStatusFields(void) const
 {
+	Zone::Ptr zone = static_pointer_cast<Zone>(GetObject());
+
+	Log(LogDebug, "ZoneDbObject")
+	    << "update status for zone '" << zone->GetName() << "'";
+
+	std::pair<bool, double> bag = GetConnectionLag(zone);
+
 	Dictionary::Ptr fields = new Dictionary();
-	Endpoint::Ptr endpoint = static_pointer_cast<Endpoint>(GetObject());
-
-	Log(LogDebug, "EndpointDbObject")
-	    << "update status for endpoint '" << endpoint->GetName() << "'";
-
-	fields->Set("identity", endpoint->GetName());
-	fields->Set("node", IcingaApplication::GetInstance()->GetNodeName());
-	fields->Set("zone_object_id", endpoint->GetZone());
-	fields->Set("is_connected", EndpointIsConnected(endpoint));
+	fields->Set("is_connected", (bag.first ? 1 : 0));
+	fields->Set("log_lag", bag.second);
+	fields->Set("parent_zone_object_id", zone->GetParent());
 
 	return fields;
 }
 
-void EndpointDbObject::UpdateConnectedStatus(const Endpoint::Ptr& endpoint)
+void ZoneDbObject::UpdateConnectedStatus(const Zone::Ptr& zone)
 {
-	bool connected = EndpointIsConnected(endpoint);
-
-	Log(LogDebug, "EndpointDbObject")
-	    << "update is_connected=" << connected << " for endpoint '" << endpoint->GetName() << "'";
+	std::pair<bool, double> bag = GetConnectionLag(zone);
 
 	DbQuery query1;
-	query1.Table = "endpointstatus";
+	query1.Table = "zonestatus";
 	query1.Type = DbQueryUpdate;
 	query1.Category = DbCatState;
 
 	Dictionary::Ptr fields1 = new Dictionary();
-	fields1->Set("is_connected", (connected ? 1 : 0));
+	fields1->Set("is_connected", (bag.first ? 1 : 0));
+	fields1->Set("log_lag", bag.second);
 	fields1->Set("status_update_time", DbValue::FromTimestamp(Utility::GetTime()));
+	fields1->Set("parent_zone_object_id", zone->GetParent());
 	query1.Fields = fields1;
 
 	query1.WhereCriteria = new Dictionary();
-	query1.WhereCriteria->Set("endpoint_object_id", endpoint);
+	query1.WhereCriteria->Set("zone_object_id", zone);
 	query1.WhereCriteria->Set("instance_id", 0); /* DbConnection class fills in real ID */
 
 	OnQuery(query1);
 }
 
-int EndpointDbObject::EndpointIsConnected(const Endpoint::Ptr& endpoint)
-{
-	unsigned int is_connected = endpoint->IsConnected() ? 1 : 0;
-
-	/* if identity is equal to node, fake is_connected */
-	if (endpoint->GetName() == IcingaApplication::GetInstance()->GetNodeName())
-		is_connected = 1;
-
-	return is_connected;
-}
-
-void EndpointDbObject::OnConfigUpdate(void)
+void ZoneDbObject::OnConfigUpdate(void)
 {
 	/* update current status on config dump once */
-	Endpoint::Ptr endpoint = static_pointer_cast<Endpoint>(GetObject());
+	Zone::Ptr zone = static_pointer_cast<Zone>(GetObject());
+
+	std::pair<bool, double> bag = GetConnectionLag(zone);
 
 	DbQuery query1;
-	query1.Table = "endpointstatus";
+	query1.Table = "zonestatus";
 	query1.Type = DbQueryInsert;
 	query1.Category = DbCatConfig;
 
 	Dictionary::Ptr fields1 = new Dictionary();
-	fields1->Set("identity", endpoint->GetName());
-	fields1->Set("node", IcingaApplication::GetInstance()->GetNodeName());
-	fields1->Set("zone_object_id", endpoint->GetZone());
-	fields1->Set("is_connected", EndpointIsConnected(endpoint));
+	fields1->Set("is_connected", (bag.first ? 1 : 0));
+	fields1->Set("log_lag", bag.second);
 	fields1->Set("status_update_time", DbValue::FromTimestamp(Utility::GetTime()));
-	fields1->Set("endpoint_object_id", endpoint);
+	fields1->Set("parent_zone_object_id", zone->GetParent());
 	fields1->Set("instance_id", 0); /* DbConnection class fills in real ID */
 	query1.Fields = fields1;
 
 	OnQuery(query1);
+}
+
+std::pair<bool, double> ZoneDbObject::GetConnectionLag(const Zone::Ptr& zone)
+{
+	bool connected = false;
+	double lag = 0;
+
+        BOOST_FOREACH(const Endpoint::Ptr& endpoint, zone->GetEndpoints()) {
+                double eplag = Utility::GetTime() - endpoint->GetRemoteLogPosition();
+
+                if (endpoint->IsConnected())
+                        connected = true;
+
+                if ((endpoint->GetSyncing() || !endpoint->IsConnected()) && eplag > lag)
+                        lag = eplag;
+        }
+
+	return std::make_pair(connected, lag);
 }
