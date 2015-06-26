@@ -20,11 +20,21 @@
 #ifndef URLPARSER_H
 #define URLPARSER_H
 
-#include <string>
+#include "base/i2-base.hpp"
+#include "base/string.hpp"
+#include "base/value.hpp"
 #include <map>
+#include <vector>
 
 namespace icinga
 {
+
+enum UrlScheme {
+	UrlSchemeHttp = 7,
+	UrlSchemeHttps = 8,
+	UrlSchemeFtp = 6,
+	UrlSchemeUndefined = 0,
+};
 
 /**
  * A url parser to use with the API
@@ -32,38 +42,28 @@ namespace icinga
  * @ingroup base
  */
 
-class I2_BASE_API Url : public ObjectImpl<Url>
+class I2_BASE_API Url
 {
 public:
-	DECLARE_OBJECT(Url);
-	DECLARE_OBJECTNAME(Url);
 
-	Url(std::string);
+	Url(const String& url);
+	bool IsValid();
 
 private:
-    map<std::string,std::string> percentCodes {
-		{ "%21", "!" },
-		{ "%23", "#" },
-		{ "%24", "$" },
-		{ "%26", "&" },
-		{ "%27", "'" },
-		{ "%28", "(" },
-		{ "%29", ")" },
-		{ "%2A", "*" },
-		{ "%2B", "+" },
-		{ "%2C", "," },
-		{ "%2F", "/" },
-		{ "%3A", ":" },
-		{ "%3B", ";" },
-		{ "%3D", "=" },
-		{ "%3F", "?" },
-		{ "%40", "@" },
-		{ "%5B", "[" },
-		{ "%5D", "]" },
-	};  
+	bool valid;
 
-	std::string percentDecode(const std::string&);
-	std::string percentEncode(const std::string&);
+	String m_Hostname;
+	UrlScheme m_Scheme;
+	std::map<String,String> m_PercentCodes;
+	std::map<String,Value> m_parameters;
+	std::vector<String> m_Path;
+
+	bool ValidateToken(const String& token, const String& illegalSymbols);
+	bool ParsePath(const String& path);
+	bool ParseParameters(const String& path);
+
+	String PercentDecode(const String& token);
+	String PercentEncode(const String& token);
 };
 
 }
