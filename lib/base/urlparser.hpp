@@ -21,6 +21,7 @@
 #define URLPARSER_H
 
 #include "base/i2-base.hpp"
+#include "base/object.hpp"
 #include "base/string.hpp"
 #include "base/value.hpp"
 #include <map>
@@ -55,13 +56,15 @@ private:
 	String m_Hostname;
 	UrlScheme m_Scheme;
 	std::map<String,String> m_PercentCodes;
-	std::map<String,Value> m_parameters;
+	std::map<String,Value> m_Parameters;
 	std::vector<String> m_Path;
 
 	bool ValidateToken(const String& token, const String& illegalSymbols);
+	bool ParseHost(const String& host, int unicode=0);
 	bool ParsePath(const String& path);
-	bool ParseParameters(const String& path);
+	void ParseParameters(const String& path);
 
+	bool IsAscii(const unsigned char& c, const int flag);
 	String PercentDecode(const String& token);
 	String PercentEncode(const String& token);
 };

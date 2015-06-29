@@ -78,9 +78,7 @@ Url::Url(const String& url)
 
 	String parameters = url.SubStr(paramPos);
 
-	if (!ParseParameters(parameters))
-		return;
-
+	ParseParameters(parameters);
 }
 
 bool Url::IsAscii(const unsigned char& c, const int flag) {
@@ -105,10 +103,10 @@ bool Url::IsValid() {
 	return valid;
 }
 
-String Url::ParseHost(const String& host, int unicode=0) {
-	if (*host.Begin() == "[") {
+bool Url::ParseHost(const String& host, int unicode) {
+	if (*host.Begin() == '[') {
 		// TODO String needs a Reverse Iterator
-		if (*std::string(host).rbegin(); != "]") {
+		if (*host.RBegin() != ']') {
 			return false;
 		} else {
 		//TODO Parase ipv6
@@ -116,64 +114,62 @@ String Url::ParseHost(const String& host, int unicode=0) {
 		}
 	}
 
-	return PercentDecode(host);
+	m_Hostname = PercentDecode(host);
+	return true;
 }
 
 bool Url::ParsePath(const String& path) {
+	std::string pathStr = path;
 	boost::char_separator<char> sep("/");
 	boost::tokenizer<boost::char_separator<char> > 
-	    tokens(path, sep);
+	    tokens(pathStr, sep);
+	String decodedToken;
 
 	BOOST_FOREACH(const String& token, tokens) {
-		m_Path.push_back(PercentDecode(token));
+		decodedToken = PercentDecode(token);
+		if (!ValidateToken(decodedToken, "/"))
+			return false;
+		m_Path.push_back(decodedToken);
 		//TODO Validate + deal with .. and .
 	}
 
 	return true;
 }
 
-bool Url::ParseParameters(const String& parameters) {
+void Url::ParseParameters(const String& parameters) {
+	//Tokenizer does not like String AT ALL
+	std::string parametersStr = parameters;
 	boost::char_separator<char> sep("&");
-	boost::tokenizer<boost::char_separator<char> > 
-	    tokens(parameters, sep);
+	boost::tokenizer<boost::char_separator<char> >
+	    tokens(parametersStr, sep);
 
 	std::map<String, Value>::iterator it;
-	size_t kvSep = String.NPos;
-	//Need rbegin in String
-	std::string key, value;
+	size_t kvSep;
+	String key, value;
 
 	BOOST_FOREACH(const String& token, tokens) {
 		kvSep = token.Find("=");
 		key = PercentDecode(token.SubStr(0, kvSep));
-		value = PercentDecode(token.Subst(kvSep+1));
-		
-		if (key.rbegin() == ']' && key.rbegin()+1 == '[') {
-			it = m_parameters.find(key.substr(0, key.length() - 2));
-			if (it == map::end) {
-				Array tmp();
-				tmp.Add(value);
-				m_parameters.insert(
-				    std::make_pair<String,Value>(key,tmp));
-			} else if (it->second.IsObjectType<Array>()) {
-				it->second<Array>.Add(value);
+		value = PercentDecode(token.SubStr(kvSep+1));
+	
+		if (*key.RBegin() == ']' && *key.RBegin()+1 == '[') {
+			it = m_Parameters.find(key.SubStr(0, key.GetLength() - 2));
+			if (it == m_Parameters.end() || !it->second.IsObjectType<Array>()) {
+				Array::Ptr tmp = new Array();
+				tmp->Add(value);
+				m_Parameters[key] = tmp;
 			} else {
-				//Key exists but is no Array
-				return false;
+				Array::Ptr arr = it->second;
+				arr->Add(value);
 			}
 		} else {
-			it = m_parameters.find(key);
-			if (it == map::end) {
-				m_paramets.insert(
-				    std::make_pair<String,Value>(key,value));
-			} else {
-				//Key already exists
-				return false;
-			}
+			m_Parameters[key] = value;
 		}
 	}
 }
 
-bool Url::ValidateToken(const String& token, const String& illegalSymbols) {
+bool Url::ValidateToken(const String& token, const String& illegalSymbols) 
+{
 	BOOST_FOREACH(const char& c, illegalSymbols.CStr()) {
 		if (token.FindFirstOf(c) != String::NPos)
 			return false;
@@ -182,14 +178,14 @@ bool Url::ValidateToken(const String& token, const String& illegalSymbols) {
 }
 
 String Url::PercentDecode(const String& token)
-{        
+{
+	//Without the typedef BOOST_FOREACH explodes
 	typedef std::pair<String,String> kv_pair;
 	String text = token;
 	BOOST_FOREACH(const kv_pair kv, m_PercentCodes) {
 		boost::replace_all(text, kv.first, kv.second);
 	}
 	return text;
-
 }
 
 String Url::PercentEncode(const String& token)
